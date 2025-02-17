@@ -4,25 +4,77 @@ import time
 import argparse
 from datetime import datetime, timedelta
 from collections import Counter
-from config import BOORU_API_URL, SERIES_LIST
+from config import BOORU_API_URL, TAG_API_URL, API_KEY, USER_ID, SERIES_LIST
 
-# Get date range for the last two weeks
-two_weeks_ago = (datetime.now() - timedelta(days=14)).strftime("%Y-%m-%d")
+# Ensure API key is available before proceeding
+if not API_KEY or not USER_ID:
+    raise ValueError("API_KEY and USER_ID must be set in config_secret.py")
+
+# Get date range for the last two weeks (Unix timestamp)
+two_weeks_ago = int((datetime.now() - timedelta(days=14)).timestamp())
+
+def make_request(url, params, retries=3, rate_limited=True):
+    """Make a request with retries and rate limit handling."""
+    for i in range(retries):
+        try:
+            response = requests.get(url, params=params)
+            if response.status_code == 200:
+                return response.json()
+            elif response.status_code in [403, 429]:  # Rate limit hit
+                wait_time = (2 ** i)  # Exponential backoff
+                print(f"Rate limit hit. Retrying in {wait_time}s...")
+                time.sleep(wait_time)
+        except requests.exceptions.RequestException as e:
+            print(f"Request failed: {e}")
+    
+    return None  # Return None if all retries fail
+
+def verify_character(tag_name):
+    """Check if a tag is an actual character (type=4) using the Gelbooru Tag API."""
+    params = {
+        "name": tag_name,
+        "json": 1,
+        "api_key": API_KEY,
+        "user_id": USER_ID
+    }
+    data = make_request(TAG_API_URL, params)
+
+    if data and isinstance(data, list) and data:
+        for tag_info in data:
+            if tag_info.get("type") == 4:  # Type 4 = character
+                return True
+    return False
 
 def fetch_series_images(series_name, rate_limited=True):
     """Fetch all images for a given series from the last two weeks."""
-    params = {
-        "tags": f"{series_name} date:>{two_weeks_ago}",
-        "limit": 200  # Fetch up to 200 images for better tag aggregation
-    }
-    
-    response = requests.get(BOORU_API_URL, params=params)
-    if rate_limited:
-        time.sleep(1)  # Enforce rate limit (1 request per second)
-    
-    if response.status_code == 200:
-        return response.json().get("post", [])
-    return []
+    images = []
+    page = 0
+
+    while True:
+        params = {
+            "tags": f"{series_name}",
+            "limit": 100,
+            "pid": page,
+            "json": 1,
+            "api_key": API_KEY,
+            "user_id": USER_ID
+        }
+
+        data = make_request(BOORU_API_URL, params, rate_limited=rate_limited)
+        if not data or "post" not in data:
+            break  # No more posts available
+
+        sorted_posts = sorted(data["post"], key=lambda x: int(x.get("change", 0)), reverse=True)
+        images.extend(sorted_posts)
+
+        # Check if the oldest post in this batch is older than 2 weeks
+        oldest_post_date = int(sorted_posts[-1].get("change", 0))
+        if oldest_post_date < two_weeks_ago:
+            break  # Stop fetching older images
+
+        page += 1
+
+    return images
 
 def extract_top_characters(images):
     """Extract the top 5 most common character tags from images."""
@@ -31,25 +83,46 @@ def extract_top_characters(images):
     for img in images:
         tags = img.get("tags", "").split()
         for tag in tags:
-            if "character" in tag:  # Filtering character-related tags
-                tag_counter[tag] += 1
-    
-    return [char[0] for char in tag_counter.most_common(5)]
+            formatted_tag = tag.lower().replace(" ", "_")
+            tag_counter[formatted_tag] += 1  # Count occurrences
+
+    # Filter valid character names before selecting the top 5
+    valid_characters = {tag for tag in tag_counter if verify_character(tag)}
+
+    top_characters = [char for char, _ in tag_counter.most_common(10) if char in valid_characters][:5]
+
+    return top_characters
 
 def fetch_character_images(character_name, rate_limited=True):
-    """Fetch images for a specific character."""
-    params = {
-        "tags": f"{character_name} date:>{two_weeks_ago}",
-        "limit": 100
-    }
-    
-    response = requests.get(BOORU_API_URL, params=params)
-    if rate_limited:
-        time.sleep(1)  # Enforce rate limit
-    
-    if response.status_code == 200:
-        return response.json().get("post", [])
-    return []
+    """Fetch images for a specific character from the last two weeks."""
+    images = []
+    page = 0
+
+    while True:
+        params = {
+            "tags": f"{character_name}",
+            "limit": 100,
+            "pid": page,
+            "json": 1,
+            "api_key": API_KEY,
+            "user_id": USER_ID
+        }
+
+        data = make_request(BOORU_API_URL, params, rate_limited=rate_limited)
+        if not data or "post" not in data:
+            break
+        
+        sorted_posts = sorted(data["post"], key=lambda x: int(x.get("change", 0)), reverse=True)
+        images.extend(sorted_posts)
+
+        # Check if the oldest post is older than 2 weeks
+        oldest_post_date = int(sorted_posts[-1].get("change", 0))
+        if oldest_post_date < two_weeks_ago:
+            break
+
+        page += 1
+
+    return images
 
 def process_series_data(rate_limited=True):
     """Fetch and process character data dynamically for each series."""
