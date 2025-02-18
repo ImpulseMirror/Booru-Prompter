@@ -66,3 +66,46 @@ API rate limits may affect request speed.
 
 
 This should now be perfectly formatted for GitHub! Let me know if you need any other adjustments. 🚀
+
+## Running Unit Tests
+
+To verify the functionality of this project, you can run the **unit tests** which simulate API responses.
+
+### **1. Install Testing Dependencies**
+Make sure you have **`unittest`** installed (it comes with Python by default).
+
+If you haven't already installed the project dependencies, install them with:
+```sh
+pip install requests
+```
+
+### **2. Run Tests
+
+Run all unit tests with:
+
+```sh
+python -m unittest discover
+```
+
+or 
+
+```sh
+python test_main.py
+```
+
+### **3. What Do the Tests Cover?
+
+✅ API Request Handling - Ensures images are fetched correctly and old images are filtered.
+✅ Character Extraction - Confirms that only actual character tags are counted.
+✅ Rate Limit & Error Handling - Simulates API limits and retries.
+✅ Data Processing - Verifies that the final output format is correct.
+
+If a test fails, you’ll see an error message. If all tests pass, you’ll see:
+
+```sh
+----------------------------------------------------------------------
+Ran 5 tests in 0.XXXs
+
+OK
+```
+

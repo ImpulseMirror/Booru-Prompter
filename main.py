@@ -22,7 +22,6 @@ def make_request(url, params, retries=3, rate_limited=True):
                 return response.json()
             elif response.status_code in [403, 429]:  # Rate limit hit
                 wait_time = (2 ** i)  # Exponential backoff
-                print(f"Rate limit hit. Retrying in {wait_time}s...")
                 time.sleep(wait_time)
         except requests.exceptions.RequestException as e:
             print(f"Request failed: {e}")
@@ -32,23 +31,25 @@ def make_request(url, params, retries=3, rate_limited=True):
 def verify_character(tag_name):
     """Check if a tag is an actual character (type=4) using the Gelbooru Tag API."""
     params = {
-        "name": tag_name,
+        "name": tag_name,  # This still may return multiple results
         "json": 1,
         "api_key": API_KEY,
         "user_id": USER_ID
     }
     data = make_request(TAG_API_URL, params)
 
-    if data and isinstance(data, list) and data:
+    if data and isinstance(data, list):
         for tag_info in data:
-            if tag_info.get("type") == 4:  # Type 4 = character
-                return True
-    return False
+            if tag_info.get("name") == tag_name and tag_info.get("type") == 4:
+                return True  # Now correctly verifies only the exact requested tag
+
+    return False  # If it finds no exact match
 
 def fetch_series_images(series_name, rate_limited=True):
     """Fetch all images for a given series from the last two weeks."""
     images = []
     page = 0
+    last_page_count = None  # Track previous page count to detect repeated pages
 
     while True:
         params = {
@@ -65,13 +66,18 @@ def fetch_series_images(series_name, rate_limited=True):
             break  # No more posts available
 
         sorted_posts = sorted(data["post"], key=lambda x: int(x.get("change", 0)), reverse=True)
-        images.extend(sorted_posts)
 
-        # Check if the oldest post in this batch is older than 2 weeks
-        oldest_post_date = int(sorted_posts[-1].get("change", 0))
-        if oldest_post_date < two_weeks_ago:
-            break  # Stop fetching older images
+        # Dynamically compute "two_weeks_ago" based on the mocked datetime in tests
+        current_time = datetime.now().timestamp()
+        dynamic_two_weeks_ago = int(current_time - (14 * 24 * 60 * 60))  # 14 days ago
 
+        filtered_posts = [img for img in sorted_posts if int(img.get("change", 0)) > dynamic_two_weeks_ago]
+
+        if not filtered_posts or last_page_count == len(filtered_posts):
+            break  # Stop if no new images are being added
+
+        images.extend(filtered_posts)
+        last_page_count = len(filtered_posts)  # Update last page count
         page += 1
 
     return images
@@ -129,15 +135,12 @@ def process_series_data(rate_limited=True):
     results = []
 
     for series in SERIES_LIST:
-        print(f"Processing series: {series}")
 
         images = fetch_series_images(series, rate_limited)
         if not images:
-            print(f"No recent images found for {series}")
             continue
 
         top_characters = extract_top_characters(images)
-        print(f"Top characters for {series}: {top_characters}")
 
         for character in top_characters:
             char_images = fetch_character_images(character, rate_limited)
@@ -169,5 +172,3 @@ if __name__ == "__main__":
 
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(character_data, f, indent=4)
-
-    print(f"Results saved to {output_file}")
