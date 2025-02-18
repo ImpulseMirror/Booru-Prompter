@@ -2,6 +2,8 @@ import json
 import requests
 import time
 import argparse
+import json
+import os
 from datetime import datetime, timedelta
 from collections import Counter
 from config import BOORU_API_URL, TAG_API_URL, API_KEY, USER_ID, SERIES_LIST
@@ -119,8 +121,12 @@ def fetch_character_images(character_name, rate_limited=True):
             break
         
         sorted_posts = sorted(data["post"], key=lambda x: int(x.get("change", 0)), reverse=True)
-        images.extend(sorted_posts)
 
+        if not sorted_posts:
+            break  # No recent images
+
+        images.extend(sorted_posts)
+        
         # Check if the oldest post is older than 2 weeks
         oldest_post_date = int(sorted_posts[-1].get("change", 0))
         if oldest_post_date < two_weeks_ago:
@@ -131,7 +137,7 @@ def fetch_character_images(character_name, rate_limited=True):
     return images
 
 def process_series_data(rate_limited=True):
-    """Fetch and process character data dynamically for each series."""
+    """Fetch and process character data dynamically for each series, ensuring a valid JSON file is always generated."""
     results = []
 
     for series in SERIES_LIST:
@@ -141,6 +147,8 @@ def process_series_data(rate_limited=True):
             continue
 
         top_characters = extract_top_characters(images)
+        if not top_characters:
+            continue
 
         for character in top_characters:
             char_images = fetch_character_images(character, rate_limited)
@@ -157,6 +165,17 @@ def process_series_data(rate_limited=True):
                 "num_images_found": len(char_images),
                 "aggregated_tags": list(tags)
             })
+
+    # Ensure the results file is always created
+    output_file = "booru_gacha_results.json"
+    with open(output_file, "w") as f:
+        json.dump(results, f, indent=4)
+
+    # Verify file was successfully created
+    if os.path.exists(output_file):
+        print(f"DEBUG: Results file '{output_file}' created successfully.")
+    else:
+        print(f"ERROR: Failed to create '{output_file}'!")
 
     return results
 

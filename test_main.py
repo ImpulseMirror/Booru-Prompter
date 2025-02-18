@@ -1,6 +1,6 @@
 import unittest
 import json
-import random
+import os
 from unittest.mock import patch
 from main import fetch_series_images, extract_top_characters, fetch_character_images, verify_character, process_series_data
 from unittest.mock import patch
@@ -98,6 +98,42 @@ class TestBooruGachaFetcher(unittest.TestCase):
         
         # Ensure at least one character is returned
         self.assertGreater(len(data), 0, "Process should return at least one character entry")
+
+    @patch("main.make_request")
+    def test_fetch_series_images_no_results(self, mock_request):
+        """Test that fetch_series_images correctly returns an empty list when no results are found."""
+        mock_request.return_value = {"post": []}  # API returns no posts
+
+        images = fetch_series_images("Genshin Impact", rate_limited=False)
+
+        self.assertEqual(images, [], "fetch_series_images should return an empty list when no images are found")
+
+    @patch("main.make_request")
+    def test_fetch_character_images_no_results(self, mock_request):
+        """Test that fetch_character_images returns an empty list when no character images are found."""
+        mock_request.return_value = {"post": []}  # API returns no images
+
+        images = fetch_character_images("raiden_shogun", rate_limited=False)
+
+        self.assertEqual(images, [], "fetch_character_images should return an empty list when no images are found")
+
+    @patch("main.fetch_series_images", return_value=[])
+    @patch("main.fetch_character_images", return_value=[])
+    @patch("main.extract_top_characters", return_value=[])
+    def test_process_series_data_no_results(self, mock_extract_top_characters, mock_fetch_character_images, mock_fetch_series_images):
+        """Test that process_series_data still generates a valid empty file when no results are found."""
+        data = process_series_data(rate_limited=False)
+
+        self.assertEqual(data, [], "process_series_data should return an empty list when no data is found")
+
+        # Ensure output file is still created
+        output_file = "booru_gacha_results.json"
+        self.assertTrue(os.path.exists(output_file), "Results file should still be generated")
+
+        # Ensure file contains an empty list
+        with open(output_file, "r") as f:
+            file_content = json.load(f)
+            self.assertEqual(file_content, [], "File should contain an empty list when no data is found")
 
 if __name__ == "__main__":
     unittest.main()
