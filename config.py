@@ -14,10 +14,16 @@ except ImportError:
 
 # List of gacha series to analyze
 SERIES_LIST = [
-    "Taimanin",
-    "Blue Archive",
-    "Genshin Impact",
-    "Honkai Star Rail",
-    "Fate Grand Order",
-    "Nikke"
+    "taimanin_(series)",
+    "blue_archive",
+    "genshin_impact",
+    "honkai_(series)",
+    "honkai:_star_rail"
+    "honkai_impact_3rd"
+    "fate_(series)",
+    "fate/grand_order",
+    "nikke_(series)"
 ]
+
+# Number of days to filter images from the API
+IMAGE_FILTER_DAYS = 1  # Can be adjusted as needed

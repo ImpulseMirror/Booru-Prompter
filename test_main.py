@@ -5,6 +5,7 @@ from unittest.mock import patch
 from main import fetch_series_images, extract_top_characters, fetch_character_images, verify_character, process_series_data
 from unittest.mock import patch
 from datetime import datetime, timedelta
+from config import IMAGE_FILTER_DAYS
 
 # Sample mock data for API responses
 MOCK_IMAGE_DATA = [
@@ -30,6 +31,17 @@ MOCK_TAG_DATA = [
 
 class TestBooruGachaFetcher(unittest.TestCase):
 
+    @classmethod
+    def setUpClass(cls):
+        """Override TEST_MODE globally so all tests write to test_output."""
+        cls.test_mode_patcher = patch("main.TEST_MODE", True)
+        cls.test_mode_patcher.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        """Stop the global test_mode patch after all tests."""
+        cls.test_mode_patcher.stop()
+        
     @patch("main.datetime")
     @patch("main.make_request")
     def test_fetch_series_images(self, mock_request, mock_datetime):
@@ -50,7 +62,7 @@ class TestBooruGachaFetcher(unittest.TestCase):
         self.assertGreater(len(images), 0, "Should return at least one recent image")
 
         # Ensure all images are 'recent' dynamically
-        self.assertTrue(all(int(img["change"]) > (override_time - (14 * 24 * 60 * 60)) for img in images), 
+        self.assertTrue(all(int(img["change"]) > (override_time - (IMAGE_FILTER_DAYS * 24 * 60 * 60)) for img in images), 
                         "All images should be within the last 2 weeks")
 
     @patch("main.make_request")
@@ -121,18 +133,25 @@ class TestBooruGachaFetcher(unittest.TestCase):
     @patch("main.fetch_character_images", return_value=[])
     @patch("main.extract_top_characters", return_value=[])
     def test_process_series_data_no_results(self, mock_extract_top_characters, mock_fetch_character_images, mock_fetch_series_images):
-        """Test that process_series_data still generates a valid empty file when no results are found."""
+        """Test that process_series_data still generates a valid empty file when no results are found, and cleans up after."""
         
-        # Run function in test mode
-        output_file = process_series_data(rate_limited=False, test_mode=True)
+        # Run function (TEST_MODE is overridden globally)
+        output_file = process_series_data(rate_limited=False)
 
-        # Ensure the output file was created
-        self.assertTrue(os.path.exists(output_file), "Results file should still be generated")
+        # Ensure the output file was created in test_output
+        self.assertTrue(os.path.exists(output_file), "Results file should still be generated in test mode")
 
         # Ensure file contains an empty list
         with open(output_file, "r") as f:
             file_content = json.load(f)
             self.assertEqual(file_content, [], "File should contain an empty list when no data is found")
+
+        # Cleanup: Delete the test output file
+        if os.path.exists(output_file):
+            os.remove(output_file)
+
+        # Ensure file is deleted
+        self.assertFalse(os.path.exists(output_file), "Test output file should be deleted after the test")
 
 if __name__ == "__main__":
     unittest.main()
