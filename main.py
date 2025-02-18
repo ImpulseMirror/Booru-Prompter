@@ -137,22 +137,26 @@ def fetch_character_images(character_name, rate_limited=True):
     return images
 
 def process_series_data(rate_limited=True):
-    """Fetch and process character data dynamically for each series, ensuring a valid JSON file is always generated."""
+    """Fetch and process character data dynamically for each series, ensuring results are saved with a timestamped filename."""
     results = []
 
     for series in SERIES_LIST:
+        print(f"DEBUG: Processing series: {series}")
 
         images = fetch_series_images(series, rate_limited)
         if not images:
+            print(f"DEBUG: No images found for {series}. Skipping...")
             continue
 
         top_characters = extract_top_characters(images)
         if not top_characters:
+            print(f"DEBUG: No characters found for {series}. Skipping...")
             continue
 
         for character in top_characters:
             char_images = fetch_character_images(character, rate_limited)
             if not char_images:
+                print(f"DEBUG: No images found for {character}. Skipping...")
                 continue
 
             tags = set()
@@ -166,17 +170,19 @@ def process_series_data(rate_limited=True):
                 "aggregated_tags": list(tags)
             })
 
-    # Ensure the results file is always created
-    output_file = "booru_gacha_results.json"
+    # Ensure output directory exists
+    timestamp = datetime.now().strftime("%Y-%m-%d-%H:%M")
+    output_dir = "output"
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Create filename with timestamp
+    output_file = os.path.join(output_dir, f"{timestamp}_booru_gacha_results.json")
+
+    # Save results to file
     with open(output_file, "w") as f:
         json.dump(results, f, indent=4)
 
-    # Verify file was successfully created
-    if os.path.exists(output_file):
-        print(f"DEBUG: Results file '{output_file}' created successfully.")
-    else:
-        print(f"ERROR: Failed to create '{output_file}'!")
-
+    print(f"DEBUG: Results saved to {output_file}")
     return results
 
 if __name__ == "__main__":
