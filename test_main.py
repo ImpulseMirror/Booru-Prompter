@@ -122,7 +122,7 @@ class TestBooruGachaFetcher(unittest.TestCase):
     @patch("main.extract_top_characters", return_value=[])
     def test_process_series_data_no_results(self, mock_extract_top_characters, mock_fetch_character_images, mock_fetch_series_images):
         """Test that process_series_data still generates a valid empty file when no results are found."""
-        data = process_series_data(rate_limited=False)
+        data = process_series_data(rate_limited=False, test_mode=True)
 
         self.assertEqual(data, [], "process_series_data should return an empty list when no data is found")
 

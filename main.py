@@ -136,8 +136,8 @@ def fetch_character_images(character_name, rate_limited=True):
 
     return images
 
-def process_series_data(rate_limited=True):
-    """Fetch and process character data dynamically for each series, ensuring results are saved with a timestamped filename."""
+def process_series_data(rate_limited=True, test_mode=False):
+    """Fetch and process character data dynamically for each series, ensuring results are saved in the correct directory."""
     results = []
 
     for series in SERIES_LIST:
@@ -170,9 +170,9 @@ def process_series_data(rate_limited=True):
                 "aggregated_tags": list(tags)
             })
 
-    # Ensure output directory exists
+    # Select output directory based on test mode
     timestamp = datetime.now().strftime("%Y-%m-%d-%H:%M")
-    output_dir = "output"
+    output_dir = "test_output" if test_mode else "output"
     os.makedirs(output_dir, exist_ok=True)
 
     # Create filename with timestamp
