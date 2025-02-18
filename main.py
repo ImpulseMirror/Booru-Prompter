@@ -137,7 +137,11 @@ def fetch_character_images(character_name, rate_limited=True):
     return images
 
 def process_series_data(rate_limited=True, test_mode=False):
-    """Fetch and process character data dynamically for each series, ensuring results are saved in the correct directory."""
+    """Fetch and process character data dynamically for each series.
+    
+    - Saves results in `output/` during normal runs.
+    - Saves results in `test_output/` when running tests.
+    """
     results = []
 
     for series in SERIES_LIST:
@@ -170,20 +174,20 @@ def process_series_data(rate_limited=True, test_mode=False):
                 "aggregated_tags": list(tags)
             })
 
-    # Select output directory based on test mode
-    timestamp = datetime.now().strftime("%Y-%m-%d-%H:%M")
+    # Ensure output directory exists
+    timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     output_dir = "test_output" if test_mode else "output"
-    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)  # Create the directory if it doesn't exist
 
     # Create filename with timestamp
     output_file = os.path.join(output_dir, f"{timestamp}_booru_gacha_results.json")
 
-    # Save results to file
+    # **Force file creation even if results are empty**
     with open(output_file, "w") as f:
         json.dump(results, f, indent=4)
 
     print(f"DEBUG: Results saved to {output_file}")
-    return results
+    return output_file  # Return the filename for validation in tests
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Fetch gacha character images from Booru.")
