@@ -6,11 +6,13 @@ import json
 import os
 from datetime import datetime, timedelta
 from collections import Counter
-from config import BOORU_API_URL, TAG_API_URL, API_KEY, USER_ID, SERIES_LIST
+from config import BOORU_API_URL, TAG_API_URL, API_KEY, TOP_CHARACTER_LIMIT, USER_ID, SERIES_LIST
 from config import IMAGE_FILTER_DAYS
 
 # Global flag to determine whether the script is running in test mode
-TEST_MODE = False  
+TEST_MODE = False
+TEST_OUTPUT_DIR = "test_output"
+OUTPUT_DIR = "output"
 TAG_DIR = "tags"
 KNOWN_TAGS_FILE = os.path.join(TAG_DIR, "known_tags.json")
 # Ensure the directory exists
@@ -39,11 +41,18 @@ def make_request(url, params, retries=3, rate_limited=True):
     return None  # Return None if all retries fail
 
 def load_known_tags():
-    """Load known character and other tags from JSON."""
-    if os.path.exists(KNOWN_TAGS_FILE):
-        with open(KNOWN_TAGS_FILE, "r") as f:
-            return json.load(f)
-    return {"character_tags": [], "other_tags": []}  # Default structure
+    """Load known tags from the JSON file or create a new structure if missing."""
+    if not os.path.exists(KNOWN_TAGS_FILE):
+        return {"character_tags": [], "other_tags": [], "ignore_characters": []}
+
+    with open(KNOWN_TAGS_FILE, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    # Ensure the ignore_characters property exists
+    if "ignore_characters" not in data:
+        data["ignore_characters"] = []
+
+    return data
 
 def save_known_tags(tags_data):
     """Save updated known tags to JSON."""
@@ -83,10 +92,9 @@ def verify_character(tag):
     return False
 
 def fetch_series_images(series_name, rate_limited=True):
-    """Fetch all images for a given series from the last two weeks."""
+    """Fetch all images for a given series from the last X days, ensuring pagination works correctly."""
     images = []
     page = 0
-    last_page_count = None  # Track previous page count to detect repeated pages
 
     while True:
         params = {
@@ -104,18 +112,19 @@ def fetch_series_images(series_name, rate_limited=True):
 
         sorted_posts = sorted(data["post"], key=lambda x: int(x.get("change", 0)), reverse=True)
 
-        # Dynamically compute "filter_day_range" based on the mocked datetime in tests
+        # Dynamically compute cutoff time for recent posts
         current_time = datetime.now().timestamp()
-        dynamic_filter_day_range = int(current_time - (IMAGE_FILTER_DAYS * 24 * 60 * 60))  # IMAGE_FILTER_DAYS days ago
+        cutoff_time = int(current_time - (IMAGE_FILTER_DAYS * 24 * 60 * 60))  # Adjustable time range from config.py
 
-        filtered_posts = [img for img in sorted_posts if int(img.get("change", 0)) > dynamic_filter_day_range]
+        filtered_posts = [img for img in sorted_posts if int(img.get("change", 0)) > cutoff_time]
 
-        if not filtered_posts or last_page_count == len(filtered_posts):
-            break  # Stop if no new images are being added
+        print(f"DEBUG: Retrieved {len(sorted_posts)} images, {len(filtered_posts)} after filtering for {series_name}")
+
+        if not filtered_posts:
+            break  # Stop fetching older images
 
         images.extend(filtered_posts)
-        last_page_count = len(filtered_posts)  # Update last page count
-        page += 1
+        page += 1  # Move to the next page
 
     return images
 
@@ -123,35 +132,31 @@ def normalize_tag(tag):
     return tag.lower().replace(" ", "_")
 
 def extract_top_characters(images):
-    """Extract the top 5 most common character tags from images."""
+    """Identify the top characters from a set of images."""
+    known_tags = load_known_tags()
+    ignored_characters = set(known_tags["ignore_characters"])
+
     tag_counter = Counter()
-    for img in images:
-        tags = img.get("tags", "").split()
-        for tag in tags:
-            formatted_tag = normalize_tag(tag)
-            tag_counter[formatted_tag] += 1  # Count occurrences
+    
+    for image in images:
+        tags = image.get("tags", "").split()
+        tag_counter.update(tags)
 
-    # Filter valid character names before selecting the top 5
-    valid_characters = {normalize_tag(tag) for tag in tag_counter if verify_character(tag)}
-    # Normalize valid characters and tag counter keys
-    normalized_valid_characters = {normalize_tag(tag) for tag in valid_characters}
-    normalized_tag_counter = {normalize_tag(tag): count for tag, count in tag_counter.items()}
+    # Validate tags as actual character names
+    valid_characters = {tag for tag in tag_counter if verify_character(tag)}
 
-    top_characters = []
-    sorted_tags = sorted(normalized_tag_counter.items(), key=lambda x: x[1], reverse=True)
+    # Exclude ignored characters BEFORE ranking
+    valid_characters -= ignored_characters
 
-    for tag_tuple in sorted_tags:
-        tag = tag_tuple[0]  # Extract the tag name (ignore count)
-        
-        if tag in normalized_valid_characters:
-            top_characters.append(tag)
+    # Debugging: Print character candidates
+    print(f"DEBUG: Valid characters before sorting: {valid_characters}")
 
-        if len(top_characters) >= 5:  # Stop after selecting top 5
-            break
-    print(f"DEBUG: Top Characters: {top_characters}")
-    print(f"Top: {top_characters}")
+    # Sort by frequency and select the top 5
+    sorted_characters = sorted(valid_characters, key=lambda tag: tag_counter[tag], reverse=True)[:TOP_CHARACTER_LIMIT]
 
-    return top_characters
+    print(f"DEBUG: Top characters selected: {sorted_characters}")
+
+    return sorted_characters
 
 def fetch_character_images(character_name, rate_limited=True):
     """Fetch images for a specific character from the last two weeks."""
@@ -189,56 +194,85 @@ def fetch_character_images(character_name, rate_limited=True):
     return images
 
 def process_series_data(rate_limited=True):
-    """Fetch and process character data dynamically for each series.
-    
-    - Saves results in `output/` during normal runs.
-    - Saves results in `test_output/` when running tests.
-    """
-    results = []
+    """Fetches data for each series, groups characters under their series, and aggregates tags with counts."""
+    series_results = []
+    known_tags = load_known_tags()
+    ignored_characters = set(known_tags["ignore_characters"])
 
-    for series in SERIES_LIST:
-        print(f"DEBUG: Processing series: {series}")
+    for series_name in SERIES_LIST:
+        print(f"DEBUG: Processing series: {series_name}")
 
-        images = fetch_series_images(series, rate_limited)
+        # Fetch images for this series
+        images = fetch_series_images(series_name, rate_limited)
+        total_images_found = len(images)  # Count total images retrieved for this series
+
         if not images:
-            print(f"DEBUG: No images found for {series}. Skipping...")
+            print(f"DEBUG: No images found for {series_name}")
             continue
 
+        # Extract characters from the series, excluding ignored ones
         top_characters = extract_top_characters(images)
-        if not top_characters:
-            print(f"DEBUG: No characters found for {series}. Skipping...")
+        filtered_characters = [char for char in top_characters if char not in ignored_characters]
+
+        if not filtered_characters:
+            print(f"DEBUG: No valid characters found for {series_name} after filtering ignored characters")
             continue
 
-        for character in top_characters:
-            char_images = fetch_character_images(character, rate_limited)
-            if not char_images:
-                print(f"DEBUG: No images found for {character}. Skipping...")
+        character_data = {}
+        for character in filtered_characters:
+            # Count only images where this character appears
+            character_images = [img for img in images if character in img.get("tags", "").split()]
+
+            if not character_images:
+                print(f"DEBUG: No images found for {character}")
                 continue
 
-            tags = set()
-            for img in char_images:
-                tags.update(img.get("tags", "").split())
+            num_images_found = len(character_images)
 
-            results.append({
-                "character_name": character,
-                "series_name": series,
-                "num_images_found": len(char_images),
-                "aggregated_tags": list(tags)
-            })
+            # Count all tags in relevant images
+            tag_counter = Counter()
+            for image in character_images:
+                tags = image.get("tags", "").split()
+                tag_counter.update(tags)
 
-    # Determine output directory based on test mode
+            # Remove character tags from the count
+            tag_counter.pop(character, None)
+
+            # Sort tags by occurrence
+            sorted_tags = dict(sorted(tag_counter.items(), key=lambda x: x[1], reverse=True))
+
+            # Store character data under `characters`
+            character_data[character] = {
+                "num_images_found": num_images_found,
+                "aggregated_tags": sorted_tags
+            }
+
+        # Sort characters by number of images found (descending order)
+        sorted_character_data = dict(
+            sorted(character_data.items(), key=lambda x: x[1]["num_images_found"], reverse=True)
+        )
+
+        # Store series data with total images found and character data
+        series_results.append({
+            series_name: {
+                "total_images_found": total_images_found,
+                "characters": sorted_character_data
+            }
+        })
+
+    # Generate timestamped output filename
     timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-    output_dir = "test_output" if TEST_MODE else "output"
-    os.makedirs(output_dir, exist_ok=True)
+    output_folder = TEST_OUTPUT_DIR if TEST_MODE else OUTPUT_DIR
+    os.makedirs(output_folder, exist_ok=True)
+    output_file = os.path.join(output_folder, f"{timestamp}_booru_gacha_results.json")
 
-    # Create filename with timestamp
-    output_file = os.path.join(output_dir, f"{timestamp}_booru_gacha_results.json")
+    # Wrap results in "series" key and save as JSON
+    final_output = {"series": series_results}
 
-    # Ensure file is created
-    with open(output_file, "w") as f:
-        json.dump(results, f, indent=4)
+    with open(output_file, "w", encoding="utf-8") as f:
+        json.dump(final_output, f, indent=4, ensure_ascii=False)
 
-    print(f"DEBUG: Results saved to {output_file}")
+    print(f"Results saved to {output_file}")
     return output_file
 
 if __name__ == "__main__":
