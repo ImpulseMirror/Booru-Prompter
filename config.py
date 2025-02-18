@@ -26,5 +26,5 @@ SERIES_LIST = [
 ]
 
 # Number of days to filter images from the API
-IMAGE_FILTER_DAYS = 10  # Can be adjusted as needed
+IMAGE_FILTER_DAYS = 14  # Can be adjusted as needed
 TOP_CHARACTER_LIMIT = 10
